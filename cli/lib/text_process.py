@@ -2,13 +2,14 @@ from .search_utils import load_stopwords
 from nltk.stem import PorterStemmer
 import string
 
-STOP_WORDS = load_stopwords()
 stemmer = PorterStemmer()
 
 def normalize(text: str) -> str:
     return text.lower().translate(
         str.maketrans("","",string.punctuation)
     )
+
+STOP_WORDS = load_stopwords()
 
 def tokenize(text: str) -> list[str]:
     tokens = normalize(text).split()
