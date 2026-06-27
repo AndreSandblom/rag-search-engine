@@ -9,7 +9,7 @@ def normalize(text: str) -> str:
         str.maketrans("","",string.punctuation)
     )
 
-STOP_WORDS = load_stopwords()
+STOP_WORDS = [normalize(word) for word in load_stopwords()]
 
 def tokenize(text: str) -> list[str]:
     tokens = normalize(text).split()
