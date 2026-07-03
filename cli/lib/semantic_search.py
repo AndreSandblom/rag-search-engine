@@ -2,7 +2,7 @@ import json
 import re
 
 from sentence_transformers import SentenceTransformer
-from .search_utils import load_movies
+from .search_utils import load_movies,format_search_result,DOCUMENT_PREVIEW_LENGTH,SCORE_PRECISION
 import numpy as np
 
 MODEL = 'all-MiniLM-L6-v2'
@@ -47,9 +47,21 @@ def cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
 
     return dot_product / (norm1 * norm2)
 
-def semantic_chunking(text: str,max_chunk_size: int = 4, overlap: int = 0) -> list[str]:
-    sentences = re.split(r"(?<=[.!?])\s+",text)
-    sentences = [s for s in sentences if s.strip()]
+def semantic_chunking(text: str, max_chunk_size: int = 4, overlap: int = 0) -> list[str]:
+    text = text.strip()
+    
+    if not text:
+        return []
+    
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    
+    if len(sentences) == 1 and not text.endswith(('.', '!', '?')):
+        sentences = [text]
+    
+    sentences = [s.strip() for s in sentences if s.strip()]
+    
+    if not sentences:
+        return []
     
     grouped_chunks = []
     step = max_chunk_size - overlap
@@ -58,15 +70,15 @@ def semantic_chunking(text: str,max_chunk_size: int = 4, overlap: int = 0) -> li
 
     while start + max_chunk_size <= len(sentences):
         end = start + max_chunk_size
-        chunk = " ".join(
-            sentences[start:end]
-        )
+        chunk = " ".join(sentences[start:end])
         grouped_chunks.append(chunk)
         last_end = end
         start += step
+    
     if last_end < len(sentences):
         tail_start = max(last_end - overlap, 0)
         grouped_chunks.append(" ".join(sentences[tail_start:]))
+    
     return grouped_chunks
 
 def embed_chunks():
@@ -74,6 +86,15 @@ def embed_chunks():
     semantic_search = ChunkedSemanticSearch()
     embeddings = semantic_search.load_or_create_chunk_embeddings(movies)
     print(f"Generated {len(embeddings)} chunked embeddings")
+
+def search_chunks(query, limit):
+    movies = load_movies()
+    semantic_search = ChunkedSemanticSearch()
+    semantic_search.load_or_create_chunk_embeddings(movies)
+    results = semantic_search.search_chunks(query, limit=limit)
+    for i, result in enumerate(results, 1):
+        print(f"\n{i}. {result['title']} (score: {result['score']:.4f})")
+        print(f"   {result['document']}...")
 
 class SemanticSearch:
     def __init__(self,model_name: str = MODEL):
@@ -201,3 +222,36 @@ class ChunkedSemanticSearch(SemanticSearch):
         except FileNotFoundError:
             print("Cache not found. Building chunk embeddings...")
             return self.build_chunk_embeddings(documents)
+
+    def search_chunks(self, query: str, limit: int = 10):
+        if self.chunk_embeddings is None:
+            raise ValueError("No chunk embeddings loaded. Call `load_or_create_chunk_embeddings` first.")
+
+        query_embedding = self.generate_embedding(query)
+        chunk_scores = []
+
+        for idx, chunk_embedding in enumerate(self.chunk_embeddings):
+            metadata = self.chunk_metadata[idx]
+            score = cosine_similarity(query_embedding, chunk_embedding)
+            chunk_scores.append({
+                "chunk_idx": metadata["chunk_idx"],
+                "movie_idx": metadata["movie_idx"],
+                "score": score,
+            })
+        movie_scores = {}
+        for chunk_score in chunk_scores:
+            movie_idx = chunk_score["movie_idx"]
+            if movie_idx not in movie_scores or chunk_score["score"] > movie_scores[movie_idx]:
+                movie_scores[movie_idx] = chunk_score["score"]
+        sorted_movies = sorted(movie_scores.items(), key=lambda x: x[1], reverse=True)
+        top_movies = sorted_movies[:limit]
+        top_results = []
+        for movie_idx, score in top_movies:
+            doc = self.documents[movie_idx]
+            top_results.append(format_search_result(
+                doc_id=doc["id"],
+                title=doc["title"],
+                document=doc["description"][:DOCUMENT_PREVIEW_LENGTH],
+                score=score,
+            ))
+        return top_results
