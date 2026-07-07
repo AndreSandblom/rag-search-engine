@@ -13,6 +13,9 @@ class InvertedIndex:
         self.docmap = {}
         self.term_frequencies = defaultdict(Counter)
         self.doc_lengths = dict()
+        self.index_path = os.path.join(CACHE_PATH, "index.pkl")
+        self.docmap_path = os.path.join(CACHE_PATH, "docmap.pkl")
+        self.term_frequencies_path = os.path.join(CACHE_PATH, "term_frequencies.pkl")
         self.doc_lengths_path = os.path.join(CACHE_PATH, "doc_lengths.pkl")
 
     def __add_document(self, doc_id,text):
