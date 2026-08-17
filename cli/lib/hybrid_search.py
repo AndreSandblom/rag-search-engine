@@ -1,8 +1,12 @@
+from asyncio import sleep
 import os
+from typing import Literal
 
 from .keyword_search import InvertedIndex
 from .semantic_search import ChunkedSemanticSearch
 from .search_utils import load_movies
+from .query_enhancement import rerank_cross_encoder, rewrite_query, spell_correction, expand_query,rerank_individual,rerank_batch
+
 
 def normalize_scores(scores: list[float]) -> list[float]:
     """Normalize a list of scores to the range [0, 1].
@@ -51,23 +55,63 @@ def weighted_search_command(query: str, alpha: float, limit: int = 5) -> None:
         print(f"  BM25: {result.get('bm25_score', 0.0):.3f}, Semantic: {result.get('semantic_score', 0.0):.3f}")
         print(f"  {result['description']}...")
 
-def rrf_search_command(query: str, k: int, limit: int = 5) -> None:
+def rrf_search_command(query: str, k: int, limit: int = 5,
+                        enhance: Literal["spell", "rewrite", "expand"] | None = None,
+                        rerank_method: Literal["individual", "batch", "cross_encoder"] | None = None
+                        ) -> dict:
     """Perform an RRF hybrid search and print the results.
 
     Args:
         query: Search query.
         k: RRF parameter k.
         limit: Number of search results to return.
+        optional enhance: Method to enhance the query (e.g., "spell", "rewrite", "expand").
+        optional rerank_method: Method to rerank results (e.g., "individual").
     """
     movies = load_movies()
     hybrid_search = HybridSearch(movies)
-    results = hybrid_search.rrf_search(query, k=k, limit=limit)
+    original_query = query
+    enhanced_query = None
 
-    for i, result in enumerate(results, 1):
-        print(f"\n{i}. {result['title']}")
-        print(f"  RRF Score: {result['rrf_score']:.3f}")
-        print(f"  BM25 Rank: {result.get('bm25_rank', 0.0)}, Semantic Rank: {result.get('semantic_rank', 0.0)}")
-        print(f"  {result['description']}...")
+    if enhance == "spell":
+        enhanced_query = spell_correction(query)
+        print(f"Enhanced query ({enhance}): '{original_query}' -> '{enhanced_query}'\n")
+        query = enhanced_query
+    elif enhance == "rewrite":
+        enhanced_query = rewrite_query(query)
+        print(f"Enhanced query ({enhance}): '{original_query}' -> '{enhanced_query}'\n")
+        query = enhanced_query
+    elif enhance == "expand":
+        enhanced_query = expand_query(query)
+        print(f"Enhanced query ({enhance}): '{original_query}' -> '{enhanced_query}'\n")
+        query = enhanced_query
+
+    search_limit = limit * 5 if rerank_method else limit
+
+    results = hybrid_search.rrf_search(query, k=k, limit=search_limit)
+
+    if rerank_method == "individual":
+        for result in results:
+            reranked_scores = rerank_individual(query, result)
+            sleep(3)
+            result['reranked_score'] = reranked_scores
+        results = sorted(results, key=lambda x: x['reranked_score'], reverse=True)[:limit]
+    elif rerank_method == "batch":
+        results = rerank_batch(query, results)[:limit]
+    elif rerank_method == "cross_encoder":
+        results = rerank_cross_encoder(query, results)[:limit]
+
+            
+    return {
+        "original_query": original_query,
+        "enhanced_query": enhanced_query,
+        "enhance_method": enhance,
+        "rerank_method": rerank_method,
+        "k": k,
+        "limit": limit,
+        "results": results
+    }
+
 
 class HybridSearch:
     def __init__(self, documents: list[dict]) -> None:
